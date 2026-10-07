@@ -1,0 +1,232 @@
+{
+  "name": "maimai-chart-preview",
+  "displayName": "maimai Chart Preview",
+  "description": "Play and preview maimai DX Simai and MA2 charts in Visual Studio Code",
+  "version": "0.1.0",
+  "publisher": "amatsuka",
+  "author": {
+    "name": "Amatsuka"
+  },
+  "icon": "./media/icon.png",
+  "license": "SEE LICENSE IN LICENSE",
+  "keywords": [
+    "simai",
+    "ma2",
+    "maimai",
+    "maimai dx",
+    "rhythm game",
+    "chart editor",
+    "chart preview",
+    "music game"
+  ],
+  "galleryBanner": {
+    "color": "#1976D2",
+    "theme": "dark"
+  },
+  "engines": {
+    "vscode": "^1.80.0",
+    "node": ">=22.14.0"
+  },
+  "activationEvents": [
+    "onCommand:maimai.openPreview",
+    "onCommand:maimai.openPreviewToSide",
+    "onLanguage:simai",
+    "onLanguage:ma2",
+    "onCommand:maimai.playFromCursor",
+    "onLanguage:plaintext"
+  ],
+  "categories": [
+    "Programming Languages",
+    "Visualization",
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "simai",
+        "aliases": [
+          "Simai",
+          "simai",
+          "maidata"
+        ],
+        "extensions": [
+          ".simai",
+          ".maidata"
+        ],
+        "filenames": [
+          "maidata.txt"
+        ],
+        "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "ma2",
+        "aliases": [
+          "MA2",
+          "ma2"
+        ],
+        "extensions": [
+          ".ma2"
+        ],
+        "configuration": "./ma2-language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "simai",
+        "scopeName": "source.simai",
+        "path": "./syntaxes/simai.tmLanguage.json"
+      },
+      {
+        "language": "ma2",
+        "scopeName": "source.ma2",
+        "path": "./syntaxes/ma2.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "simai",
+        "path": "./snippets/simai.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "maimai.openPreview",
+        "title": "maimai: Open Chart Preview",
+        "icon": {
+          "dark": "./media/icons/maimai-preview-dark.svg",
+          "light": "./media/icons/maimai-preview-light.svg"
+        }
+      },
+      {
+        "command": "maimai.openPreviewToSide",
+        "title": "maimai: Open Chart Preview to Side",
+        "icon": {
+          "dark": "./media/icons/maimai-preview-dark.svg",
+          "light": "./media/icons/maimai-preview-light.svg"
+        }
+      },
+      {
+        "command": "maimai.playFromCursor",
+        "title": "maimai: Play from Cursor"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "maimai.openPreviewToSide",
+          "when": "editorLangId == simai || editorLangId == ma2 || resourceExtname == .ma2 || resourceExtname == .simai || resourceExtname == .maidata || resourceFilename == maidata.txt",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "maimai.openPreview"
+        },
+        {
+          "command": "maimai.openPreviewToSide"
+        },
+        {
+          "command": "maimai.playFromCursor",
+          "when": "editorLangId == simai || editorLangId == ma2"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "maimai.playFromCursor",
+          "when": "editorLangId == simai || editorLangId == ma2",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "maimai Chart Preview",
+      "properties": {
+        "maimai.preview.autoSyncCursor": {
+          "type": "boolean",
+          "default": true,
+          "description": "Seek to the editor cursor only while paused and only within the selected chart difficulty. Playback and other difficulty sections are unaffected."
+        },
+        "maimai.preview.defaultHiSpeed": {
+          "type": "number",
+          "default": 5,
+          "minimum": 3,
+          "maximum": 9,
+          "description": "Default note falling speed (Hi-Speed, 3.0 to 9.0 in 0.1 increments). Does not change music or SE playback speed."
+        },
+        "maimai.preview.judgmentLineDesign": {
+          "type": "string",
+          "enum": [
+            "sensor",
+            "simple",
+            "noLine",
+            "blind"
+          ],
+          "default": "sensor",
+          "description": "Design of judgment ring line and touch sensors."
+        },
+        "maimai.preview.showFireworks": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show fireworks for touch notes."
+        },
+        "maimai.preview.enableHitsound": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable all chart sound effects (SE). Accompaniment music is unaffected."
+        },
+        "maimai.preview.timingOffsetMs": {
+          "type": "number",
+          "default": 0,
+          "minimum": -500,
+          "maximum": 500,
+          "description": "Timing offset for hit sounds in milliseconds."
+        },
+        "maimai.preview.musicVolume": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Initial accompaniment music volume."
+        },
+        "maimai.preview.seVolume": {
+          "type": "number",
+          "default": 0.5,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Initial volume of all chart sound effects, including answer, judgment and sustained sounds."
+        },
+        "maimai.preview.autoDetectCharts": {
+          "type": "boolean",
+          "default": true,
+          "description": "Detect Simai and MA2 signatures in opened plaintext .txt files. Explicit language choices and files.associations are preserved."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "build": "node build.mjs",
+    "assets:import": "node scripts/chart-assets.mjs",
+    "package": "vsce package --no-dependencies",
+    "vscode:prepublish": "node build.mjs && node scripts/chart-assets.mjs --check"
+  },
+  "packageManager": "yarn@4.13.0",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wsyzxjn/maimai-chart-preview.git"
+  },
+  "bugs": {
+    "url": "https://github.com/wsyzxjn/maimai-chart-preview/issues"
+  },
+  "homepage": "https://github.com/wsyzxjn/maimai-chart-preview#readme",
+  "devDependencies": {
+    "@lxns-network/maimai-chart-engine": "patch:@lxns-network/maimai-chart-engine@https%3A//github.com/Lxns-Network/maimai-prober-frontend.git%23workspace=%2540lxns-network%252Fmaimai-chart-engine&commit=6614ff5a96cbc56175b7595d6ea9bb6cbdc28f95#~/.yarn/patches/@lxns-network-maimai-chart-engine-https-becd065466.patch",
+    "@types/node": "24.13.3",
+    "@vscode/vsce": "4.0.0",
+    "esbuild": "0.28.0",
+    "typescript": "5.9.3"
+  }
+}

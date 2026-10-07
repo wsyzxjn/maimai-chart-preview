@@ -1,0 +1,129 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Simai",
+  "scopeName": "source.simai",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#metadata"
+    },
+    {
+      "include": "#bpm"
+    },
+    {
+      "include": "#divisor"
+    },
+    {
+      "include": "#duration"
+    },
+    {
+      "include": "#separators"
+    },
+    {
+      "include": "#touch-notes"
+    },
+    {
+      "include": "#slides"
+    },
+    {
+      "include": "#button-notes"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.simai",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.simai",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "metadata": {
+      "patterns": [
+        {
+          "name": "keyword.other.metadata.simai",
+          "match": "^\\s*&[a-zA-Z0-9_]+\\s*="
+        }
+      ]
+    },
+    "bpm": {
+      "patterns": [
+        {
+          "name": "constant.numeric.bpm.simai",
+          "match": "\\(([0-9]+(?:\\.[0-9]+)?)\\)"
+        }
+      ]
+    },
+    "divisor": {
+      "patterns": [
+        {
+          "name": "constant.numeric.divisor.simai",
+          "match": "\\{([0-9]+(?:\\.[0-9]+)?)\\}"
+        }
+      ]
+    },
+    "duration": {
+      "patterns": [
+        {
+          "name": "string.interpolated.duration.simai",
+          "match": "\\[(?:[0-9]+:[0-9]+|#[0-9]+(?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?##[0-9]+(?:\\.[0-9]+)?)\\]"
+        }
+      ]
+    },
+    "separators": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.comma.simai",
+          "match": ","
+        },
+        {
+          "name": "punctuation.separator.slash.simai",
+          "match": "/"
+        },
+        {
+          "name": "punctuation.separator.backtick.simai",
+          "match": "`"
+        },
+        {
+          "name": "keyword.operator.end.simai",
+          "match": "E"
+        }
+      ]
+    },
+    "touch-notes": {
+      "patterns": [
+        {
+          "name": "entity.name.tag.touch.simai",
+          "match": "(?:[A-E][1-8]|C)[a-z0-9#]*"
+        }
+      ]
+    },
+    "slides": {
+      "patterns": [
+        {
+          "name": "keyword.operator.slide.simai",
+          "match": "[-<>^vVpqszw*?]"
+        }
+      ]
+    },
+    "button-notes": {
+      "patterns": [
+        {
+          "name": "entity.name.function.button.simai",
+          "match": "[1-8]"
+        },
+        {
+          "name": "storage.modifier.note.simai",
+          "match": "[bxfh$@!]"
+        }
+      ]
+    }
+  }
+}

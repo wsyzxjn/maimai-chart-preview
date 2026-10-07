@@ -1,0 +1,21 @@
+{
+  "name": "MA2",
+  "scopeName": "source.ma2",
+  "patterns": [
+    { "name": "comment.line.number-sign.ma2", "match": "^\\s*#.*$" },
+    {
+      "name": "keyword.other.header.ma2",
+      "match": "(?i)^\\s*(?:VERSION|FES_MODE|BPM_DEF|MET_DEF|RESOLUTION|CLK_DEF|COMPATIBLE_CODE|CREATOR|DESIGNER|TITLE|ARTIST|PLAYLEVEL)\\b"
+    },
+    {
+      "name": "keyword.control.timing.ma2",
+      "match": "(?i)^\\s*(?:BPM|MET)\\b"
+    },
+    {
+      "name": "entity.name.function.note.ma2",
+      "match": "(?i)^\\s*(?:NM|BR|EX|BX|CN)(?:TAP|HLD|STR|TTP|THO|SI_|SCR|SCL|SXR|SXL|SUL|SUR|SV_|SVP|SF_|SWF|SSL|SSR|SLL|SLR)\\b"
+    },
+    { "name": "keyword.other.statistics.ma2", "match": "(?i)^\\s*(?:T_REC|T_NUM|T_JUDGE|TTM|TT|TTN)[A-Z0-9_]*\\b" },
+    { "name": "constant.numeric.ma2", "match": "(?<![\\w.])-?\\d+(?:\\.\\d+)?(?![\\w.])" }
+  ]
+}

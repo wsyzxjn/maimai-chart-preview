@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.vsix
+.DS_Store
+
+# 示例谱面忽略
+examples/
+
+.yarn/*
+!.yarn/patches/
+.env
+.env.*
+!.env.example

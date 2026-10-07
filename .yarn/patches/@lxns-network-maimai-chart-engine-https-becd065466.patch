@@ -1,0 +1,443 @@
+diff --git a/src/core/audio/AudioManager.ts b/src/core/audio/AudioManager.ts
+index cd6fba96c68893b558993e761b2097659c53310b..2068bcd7e08ec02ba238ebc575608ef16e54b59b 100644
+--- a/src/core/audio/AudioManager.ts
++++ b/src/core/audio/AudioManager.ts
+@@ -36,6 +36,8 @@ export interface AudioManagerConfig {
+   audioContext: AudioContext;
+   /** 音频图中的目标输出节点。 */
+   outputNode: AudioNode;
++  /** 音效文件所在的绝对目录 URL，须以 / 结尾；省略时使用网页默认资源路径。 */
++  soundBaseUrl?: string;
+   /** 正解音层初始音量（0 ~ 1）。 */
+   initialVolume?: number;
+   /** 初始发声时间偏移量（毫秒）。 */
+@@ -283,6 +285,7 @@ export function prepareAudioEvents(notes: readonly Note[] | null): PreparedAudio
+ export class AudioManager {
+   private audioContext: AudioContext;
+   private outputNode: AudioNode;
++  private soundBaseUrl?: string;
+   private answerBuffer: AudioBuffer | null = null;
+   private tapBuffer: AudioBuffer | null = null;
+   private touchBuffer: AudioBuffer | null = null;
+@@ -320,6 +323,7 @@ export class AudioManager {
+   constructor(config: AudioManagerConfig) {
+     this.audioContext = config.audioContext;
+     this.outputNode = config.outputNode;
++    this.soundBaseUrl = config.soundBaseUrl;
+     this.volume = config.initialVolume ?? 0.5;
+     this.timingOffsetMs = config.initialTimingOffset ?? ANSWER_SOUND_BASE_OFFSET_MS;
+     this.answerGainNode = this.audioContext.createGain();
+@@ -399,7 +403,10 @@ export class AudioManager {
+   }
+ 
+   private async loadBuffer(path: string): Promise<AudioBuffer> {
+-    const response = await fetch(path);
++    const url = this.soundBaseUrl
++      ? new URL(path.slice(path.lastIndexOf("/") + 1), this.soundBaseUrl).href
++      : path;
++    const response = await fetch(url);
+     const arrayBuffer = await response.arrayBuffer();
+     return await this.audioContext.decodeAudioData(arrayBuffer);
+   }
+diff --git a/src/core/index.ts b/src/core/index.ts
+index 310ec9b44ad2c8a7644595105027a7fc40f195b2..e880ff8ac0416b742c47a3aff455052ddddd20c9 100644
+--- a/src/core/index.ts
++++ b/src/core/index.ts
+@@ -2,6 +2,7 @@ export {
+   parseSimaiChart,
+   parseMa2Chart,
+   getAvailableDifficulties,
++  readSimaiSections,
+   type ChartFileType,
+   default as ChartParser,
+ } from "./parser/ChartParser";
+diff --git a/src/core/parser/ChartParser.ts b/src/core/parser/ChartParser.ts
+index 205bb01086ec717747c139b327e01ada516c8775..64bb9c5ee035c287636aba2b3934e1df1e6565c6 100644
+--- a/src/core/parser/ChartParser.ts
++++ b/src/core/parser/ChartParser.ts
+@@ -2,4 +2,5 @@ export type ChartFileType = "simai" | "ma2";
+ 
+ export { parseMa2Chart } from "./Ma2Parser";
+ export { getAvailableDifficulties, parseSimaiChart } from "./SimaiParser";
++export { readSimaiSections } from "./SimaiSections";
+ export { parseSimaiChart as default } from "./SimaiParser";
+diff --git a/src/core/parser/SimaiParser.ts b/src/core/parser/SimaiParser.ts
+index 03516b01e925e7ef84520d4e29a9b7a14f8e005c..c58db0b985e554556c099ab09935d7cb04f0a8cf 100644
+--- a/src/core/parser/SimaiParser.ts
++++ b/src/core/parser/SimaiParser.ts
+@@ -2,9 +2,7 @@ import { match } from "ts-pattern";
+ import {
+   Chart,
+   ChartMetadata,
+-  ChartLevels,
+   ChartDesigners,
+-  ChartDifficulty,
+   AvailableDifficulties,
+   Note,
+   TapNote,
+@@ -21,6 +19,7 @@ import {
+   ButtonPosition,
+   TouchPosition,
+ } from "../../types";
++import { readSimaiSections } from "./SimaiSections";
+ 
+ interface ParseNotesResult {
+   notes: Note[];
+@@ -29,26 +28,6 @@ interface ParseNotesResult {
+   divisorEvents: DivisorEvent[];
+ }
+ 
+-const INOTE_MARKERS = [
+-  "&inote_1=",
+-  "&inote_2=",
+-  "&inote_3=",
+-  "&inote_4=",
+-  "&inote_5=",
+-  "&inote_6=",
+-];
+-
+-function hasChartDigit(text: string): boolean {
+-  for (const char of text) {
+-    if (char >= "1" && char <= "8") return true;
+-  }
+-  return false;
+-}
+-
+-function splitLines(text: string): string[] {
+-  return text.split("\n").map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
+-}
+-
+ function isWhitespace(char: string): boolean {
+   return char === " " || char === "\t" || char === "\r" || char === "\n";
+ }
+@@ -63,25 +42,17 @@ function isMultiDigitNote(noteStr: string): boolean {
+ 
+ /**
+  * 探测谱面里包含哪些可用难度。
+- * 检查 `&inote_1=` 到 `&inote_6=`；如果都没写但正文里有音符按键（'1'-'8'），当单难度谱面回退并把难度 4 标为可用。
+- * 不会抛错，找不到任何可用内容就返回空对象。
++ * 标准及自定义正整数编号均可发现，空段落也保留；无分段正文沿用编号 4。
++ * 不会抛错；非法/重复声明和没有谱面内容时返回空对象。
+  */
+ export function getAvailableDifficulties(simaiText: string): AvailableDifficulties {
+   const available: AvailableDifficulties = {};
+-  const lowerSimaiText = simaiText.toLowerCase();
+-
+-  for (let i = 0; i < INOTE_MARKERS.length; i++) {
+-    if (lowerSimaiText.includes(INOTE_MARKERS[i])) {
+-      available[(i + 1) as ChartDifficulty] = true;
+-    }
+-  }
++  const source = readSimaiSections(simaiText);
++  if (source.error) return available;
++  for (const section of source.sections) available[section.id] = true;
+ 
+-  if (Object.keys(available).length === 0) {
+-    const hasChartContent = hasChartDigit(
+-      splitLines(simaiText)
+-        .filter((line) => !line.trimStart().startsWith("&"))
+-        .join(""),
+-    );
++  if (!source.hasSectionDeclarations) {
++    const hasChartContent = source.body.some((line) => line.text.trim() !== "");
+     if (hasChartContent) {
+       available[4] = true;
+     }
+@@ -96,16 +67,15 @@ export function getAvailableDifficulties(simaiText: string): AvailableDifficulti
+  * 未指定难度时默认挑最高可用难度，单难度谱面回退到难度 4。
+  * 开头会自动垫 1 小节（4 拍）前奏偏移。
+  *
+- * @throws {Error} 文本为空、缺少 `&` 元数据、指定难度不存在、缺少 BPM 声明或语法解析出错时抛错。
++ * @throws {Error} 文本为空、缺少元数据、段落声明非法/重复、正文为空、指定编号不存在或谱面解析出错时抛错。
+  */
+-export function parseSimaiChart(simaiText: string, difficulty?: ChartDifficulty): Chart {
++export function parseSimaiChart(simaiText: string, difficulty?: number): Chart {
+   if (!simaiText || typeof simaiText !== "string") {
+     throw new Error("Invalid input: expected a non-empty string");
+   }
+ 
+-  const lines = splitLines(simaiText);
+-
+-  if (!lines.some((line) => line.startsWith("&"))) {
++  const source = readSimaiSections(simaiText);
++  if (!source.hasSectionDeclarations && source.metadata.length === 0) {
+     throw new Error("Invalid simai format: expected & metadata lines (e.g. &title=, &inote_4=)");
+   }
+ 
+@@ -120,48 +90,14 @@ export function parseSimaiChart(simaiText: string, difficulty?: ChartDifficulty)
+     inotes: {},
+   };
+ 
+-  let currentInote: number | null = null;
+-  let currentInoteContent: string[] = [];
+-
+   try {
+-    for (let i = 0; i < lines.length; i++) {
+-      const line = lines[i];
+-      const trimmedLine = line.trim();
+-
+-      const inoteMatch = trimmedLine.match(/^&inote_(\d)=(.*)$/i);
+-      if (inoteMatch) {
+-        if (currentInote !== null) {
+-          metadata.inotes[currentInote] = currentInoteContent.join("\n");
+-          metadata.availableDifficulties[currentInote as ChartDifficulty] = true;
+-        }
+-
+-        currentInote = parseInt(inoteMatch[1]);
+-        currentInoteContent = inoteMatch[2] ? [inoteMatch[2]] : [];
+-        continue;
+-      }
+-
+-      if (currentInote !== null) {
+-        if (trimmedLine.startsWith("&") && !trimmedLine.startsWith("&inote")) {
+-          metadata.inotes[currentInote] = currentInoteContent.join("\n");
+-          metadata.availableDifficulties[currentInote as ChartDifficulty] = true;
+-          currentInote = null;
+-          currentInoteContent = [];
+-
+-          parseMetadataLine(trimmedLine, metadata);
+-        } else if (!trimmedLine.startsWith("&")) {
+-          currentInoteContent.push(line);
+-        }
+-        continue;
+-      }
+-
+-      if (trimmedLine.startsWith("&")) {
+-        parseMetadataLine(trimmedLine, metadata);
+-      }
+-    }
+-
+-    if (currentInote !== null) {
+-      metadata.inotes[currentInote] = currentInoteContent.join("\n");
+-      metadata.availableDifficulties[currentInote as ChartDifficulty] = true;
++    if (source.error) throw new Error(source.error);
++    if (difficulty !== undefined && (!Number.isSafeInteger(difficulty) || difficulty <= 0))
++      throw new Error("谱面编号必须是正整数");
++    for (const line of source.metadata) parseMetadataLine(line, metadata);
++    for (const section of source.sections) {
++      metadata.inotes[section.id] = section.body.map((line) => line.text).join("\n");
++      metadata.availableDifficulties[section.id] = true;
+     }
+ 
+     let selectedDifficulty = difficulty;
+@@ -169,27 +105,30 @@ export function parseSimaiChart(simaiText: string, difficulty?: ChartDifficulty)
+       .map(Number)
+       .sort((a, b) => b - a);
+ 
+-    if (!selectedDifficulty && availableDiffs.length > 0) {
+-      selectedDifficulty = availableDiffs[0] as ChartDifficulty;
++    if (selectedDifficulty === undefined && availableDiffs.length > 0) {
++      selectedDifficulty = availableDiffs[0];
+     }
+ 
+     let chartBody = "";
+ 
+-    if (selectedDifficulty && metadata.inotes[selectedDifficulty]) {
++    if (
++      selectedDifficulty !== undefined &&
++      Object.prototype.hasOwnProperty.call(metadata.inotes, selectedDifficulty)
++    ) {
+       chartBody = metadata.inotes[selectedDifficulty];
+     } else if (availableDiffs.length === 0) {
+-      for (let i = 0; i < lines.length; i++) {
+-        const line = lines[i].trim();
+-        if (line === "" || line.startsWith("&")) continue;
+-        chartBody += line;
+-      }
++      chartBody = source.body.map((line) => line.text).join("\n");
+       metadata.availableDifficulties[4] = true;
+       selectedDifficulty = 4;
+     } else {
++      throw new Error(`谱面 ${difficulty} 不存在，可用编号：${availableDiffs.join(", ")}`);
++    }
++    if (!chartBody.trim())
+       throw new Error(
+-        `Difficulty ${difficulty} not found in chart. Available: ${availableDiffs.join(", ")}`,
++        source.hasSectionDeclarations
++          ? `谱面 ${selectedDifficulty} 没有谱面内容`
++          : "文件没有谱面内容",
+       );
+-    }
+ 
+     const designerKey = `des_${selectedDifficulty}` as keyof ChartDesigners;
+     const selectedDesigner = metadata.designers[designerKey] || metadata.designer;
+@@ -281,6 +220,7 @@ export function parseSimaiChart(simaiText: string, difficulty?: ChartDifficulty)
+       level: metadata.level,
+       designers: metadata.designers,
+       difficulty: selectedDifficulty,
++      hasDifficultySections: source.hasSectionDeclarations,
+       availableDifficulties: metadata.availableDifficulties,
+       measures: maxMeasure + 2, // 前后各留 1 小节缓冲
+       notes,
+@@ -299,8 +239,16 @@ function parseMetadataLine(line: string, metadata: ChartMetadata): void {
+   const eqIndex = line.indexOf("=");
+   if (eqIndex === -1) return;
+ 
+-  const key = line.substring(1, eqIndex).trim();
++  const key = line.substring(1, eqIndex).trim().toLowerCase();
+   const value = line.substring(eqIndex + 1).trim();
++  if (/^(?:des|lv)_[1-9]\d*$/.test(key)) {
++    const id = Number(key.slice(key.indexOf("_") + 1));
++    if (Number.isSafeInteger(id)) {
++      if (key.startsWith("des_")) metadata.designers[`des_${id}`] = value;
++      else metadata.level[`lv_${id}`] = value;
++    }
++    return;
++  }
+ 
+   switch (key) {
+     case "title":
+@@ -312,22 +260,6 @@ function parseMetadataLine(line: string, metadata: ChartMetadata): void {
+     case "des":
+       metadata.designer = value;
+       break;
+-    case "des_1":
+-    case "des_2":
+-    case "des_3":
+-    case "des_4":
+-    case "des_5":
+-    case "des_6":
+-      metadata.designers[key as keyof ChartDesigners] = value;
+-      break;
+-    case "lv_1":
+-    case "lv_2":
+-    case "lv_3":
+-    case "lv_4":
+-    case "lv_5":
+-    case "lv_6":
+-      metadata.level[key as keyof ChartLevels] = value;
+-      break;
+     case "bpm": {
+       const bpmVal = parseFloat(value);
+       if (!isNaN(bpmVal)) {
+diff --git a/src/core/parser/SimaiSections.ts b/src/core/parser/SimaiSections.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..eddbb01e6a5af62f274dd7f2bc9bdf8c7e4ada63
+--- /dev/null
++++ b/src/core/parser/SimaiSections.ts
+@@ -0,0 +1,60 @@
++export interface SimaiSourceLine {
++  line: number;
++  text: string;
++}
++
++export interface SimaiSection {
++  id: number;
++  line: number;
++  body: SimaiSourceLine[];
++}
++
++/**
++ * 提取数字编号段落及原始行号，允许空正文；不会解析 Note。
++ * 非法或重复声明在 error 中返回，调用方不得将其当作无分段谱面回退。
++ */
++export function readSimaiSections(text: string): {
++  sections: SimaiSection[];
++  metadata: string[];
++  body: SimaiSourceLine[];
++  hasSectionDeclarations: boolean;
++  error?: string;
++} {
++  const sections: SimaiSection[] = [];
++  const metadata: string[] = [];
++  const body: SimaiSourceLine[] = [];
++  const ids = new Set<number>();
++  let current: SimaiSection | undefined;
++  let hasSectionDeclarations = false;
++  let error: string | undefined;
++
++  for (const [line, raw] of text
++    .replace(/^\uFEFF/, "")
++    .split(/\r?\n/)
++    .entries()) {
++    const trimmed = raw.trim();
++    if (/^&inote/i.test(trimmed)) {
++      hasSectionDeclarations = true;
++      current = undefined;
++      const match = trimmed.match(/^&inote_([1-9]\d*)\s*=(.*)$/i);
++      const id = match ? Number(match[1]) : Number.NaN;
++      if (!match || !Number.isSafeInteger(id)) {
++        error ??= `第 ${line + 1} 行的谱面段落声明无效：${trimmed}（需要 &inote_正整数=）`;
++        continue;
++      }
++      if (ids.has(id)) {
++        error ??= `第 ${line + 1} 行重复声明谱面 ${id}`;
++        continue;
++      }
++      ids.add(id);
++      current = { id, line, body: [{ line, text: match[2] }] };
++      sections.push(current);
++    } else if (trimmed.startsWith("&")) {
++      current = undefined;
++      metadata.push(trimmed);
++    } else {
++      (current?.body ?? body).push({ line, text: raw });
++    }
++  }
++  return { sections, metadata, body, hasSectionDeclarations, error };
++}
+diff --git a/src/types/index.ts b/src/types/index.ts
+index 81295e836cd0b2152aa7d971a3f1b785a387ff5d..47af5b840246d25a1d0b61d2ac4fef078c126a5f 100644
+--- a/src/types/index.ts
++++ b/src/types/index.ts
+@@ -322,34 +322,19 @@ export interface DivisorEvent {
+   divisor: number;
+ }
+ 
+-/** 各难度等级文本映射（lv_1 ~ lv_6 对应难度编号 1 ~ 6） */
++/** 按标准或自定义数字段落编号保存等级文本。 */
+ export interface ChartLevels {
+-  lv_1?: string;
+-  lv_2?: string;
+-  lv_3?: string;
+-  lv_4?: string;
+-  lv_5?: string;
+-  lv_6?: string;
++  [key: `lv_${number}`]: string | undefined;
+ }
+ 
+-/** 各难度谱师名称映射（des_1 ~ des_6 对应难度编号 1 ~ 6） */
++/** 按标准或自定义数字段落编号保存谱师名称。 */
+ export interface ChartDesigners {
+-  des_1?: string;
+-  des_2?: string;
+-  des_3?: string;
+-  des_4?: string;
+-  des_5?: string;
+-  des_6?: string;
++  [key: `des_${number}`]: string | undefined;
+ }
+ 
+-/** 各难度可用状态（key 为难度编号 1 ~ 6） */
++/** 标准难度或自定义段落编号的可用状态。 */
+ export interface AvailableDifficulties {
+-  1?: boolean;
+-  2?: boolean;
+-  3?: boolean;
+-  4?: boolean;
+-  5?: boolean;
+-  6?: boolean;
++  [sectionId: number]: boolean | undefined;
+ }
+ 
+ /**
+@@ -363,7 +348,9 @@ export interface Chart {
+   bpm: number;
+   level: ChartLevels;
+   designers: ChartDesigners;
+-  difficulty?: ChartDifficulty;
++  difficulty?: number;
++  /** Simai 是否包含显式编号段落；无段落时编号 4 仅为内部兼容值，不代表实际难度。 */
++  hasDifficultySections?: boolean;
+   availableDifficulties?: AvailableDifficulties;
+   /** 总小节数 */
+   measures: number;
+@@ -389,7 +376,7 @@ export interface ChartMetadata {
+   level: ChartLevels;
+   designers: ChartDesigners;
+   availableDifficulties: AvailableDifficulties;
+-  /** 各难度原始谱面文本（键为难度编号 1 ~ 6） */
++  /** 各标准难度或自定义段落的原始谱面文本。 */
+   inotes: Record<number, string>;
+   /** 谱面正文起点在音频中的偏移（&first，s） */
+   firstSec?: number;
