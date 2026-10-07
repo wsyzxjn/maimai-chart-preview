@@ -17,6 +17,8 @@ By Amatsuka.
 - Hit sounds and Touch Hold scheduling follow the shared engine's playback rules. The preview uses its existing reset API to resume eligible sounds after seeking or unmuting.
 - Timing offset adjustment for hit sounds.
 - Note Hi-Speed from `3.0` to `9.0` in `0.1` increments, with a slider and direct numeric input.
+- Simai metadata completion: type `&` to insert `&title=`, `&artist=`, `&des=`, `&bpm=`, or `&first=`, with the cursor left after `=`.
+- Simai snippets for a chart header (`simai-header`), BPM changes (`bpm`), and beat divisors (`div`), plus bracket auto-closing.
 
 Hi-Speed changes the falling speed of notes on screen. It does not change the playback speed of the accompaniment or hit sounds; audio remains at `1.0x`.
 
@@ -52,6 +54,8 @@ The following settings are available under **maimai Chart Preview**:
 ## Supported files
 
 The extension reads Simai and MA2 chart text and reports parse errors in the VS Code Problems panel. Both formats support syntax highlighting, playback, hit sounds, and editor cursor synchronisation.
+
+Simai `//` and `/* ... */` comments in chart bodies are ignored without changing note positions or beats; metadata values such as URLs remain literal. Unknown Note tokens, incomplete Slide paths, invalid time parameters, and malformed MA2 records are reported as errors instead of silently omitted. When a source location is available, the Problems panel marks that line or token, and diagnostics cover every difficulty while the document is edited—no preview is required. A section that never declares a valid BPM is reported on its `&inote_n=` declaration line. Completion is limited to Simai metadata keys: typing `&` offers `&title=`, `&artist=`, `&des=`, `&bpm=`, and `&first=`; note-level templates are not offered.
 
 Standard chart extensions and `maidata.txt` are recognised by name. Other `.txt` files are recognised from combined chart signatures while they are open in Plain Text mode. Detection enables the chart language, syntax highlighting, and preview button without renaming the file. It reads only the first 64 KiB and also checks while you type; unfinished charts may be recognised before they parse successfully. Ordinary prose and Markdown fenced examples are left alone.
 

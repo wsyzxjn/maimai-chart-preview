@@ -1,4 +1,5 @@
 import type { ChartFileType } from "@lxns-network/maimai-chart-engine";
+import { readSimaiSections } from "@lxns-network/maimai-chart-engine";
 
 /** A bounded, multi-line signature check; unfinished chart bodies may still be identified. */
 export function detectChartFormat(text: string): ChartFileType | null {
@@ -12,11 +13,13 @@ export function detectChartFormat(text: string): ChartFileType | null {
   const ma2Version = lines.some((line) => /^VERSION\s+\d+(?:\.\d+)*(?:\s+\d+(?:\.\d+)*)*$/i.test(line));
   if (resolution && ma2Bpm && Number(resolution.split(/\s+/)[1]) > 0 && Number(ma2Bpm.split(/\s+/)[1]) > 0 && (ma2Record || ma2Version)) return "ma2";
 
-  const inote = lines.some((line) => /^&inote_[1-9]\d*\s*=/i.test(line));
-  const bpm = lines.some((line) => /^&bpm=\d+(?:\.\d+)?$/i.test(line) && Number(line.slice(5)) > 0);
-  const inlineBpm = lines.some((line) => /^(?:&inote_[1-9]\d*\s*=)?\s*\(\d+(?:\.\d+)?\)/i.test(line));
-  const divisor = lines.some((line) => /\{\d+(?:\.\d+)?\}/.test(line) && !line.startsWith("&"));
-  const noteSequence = lines.some((line) => /^(?:&inote_[1-9]\d*\s*=)?(?:\(\d+(?:\.\d+)?\)|\{\d+(?:\.\d+)?\})*\s*(?:[1-8]|[ABCDE][1-8]?)[^\s]*,/i.test(line));
+  const source = readSimaiSections(sample);
+  const body = [...source.body, ...source.sections.flatMap((section) => section.body)].map((line) => line.text.trim());
+  const inote = source.sections.length > 0;
+  const bpm = source.metadata.some((line) => /^&bpm=\d+(?:\.\d+)?$/i.test(line.text) && Number(line.text.slice(5)) > 0);
+  const inlineBpm = body.some((line) => /^\s*\(\d+(?:\.\d+)?\)/i.test(line));
+  const divisor = body.some((line) => /\{\d+(?:\.\d+)?\}/.test(line));
+  const noteSequence = body.some((line) => /^(?:\(\d+(?:\.\d+)?\)|\{\d+(?:\.\d+)?\})*\s*(?:[1-8]|[ABCDE][1-8]?)[^\s]*,/i.test(line));
   if ((inote && (bpm || inlineBpm || noteSequence)) || (bpm && divisor && noteSequence)) return "simai";
   return null;
 }

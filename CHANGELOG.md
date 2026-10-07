@@ -2,6 +2,15 @@
 
 All notable changes to this extension will be documented in this file.
 
+## 0.1.1 - Unreleased
+
+- Ignored Simai line and block comments during playback and cursor mapping, while preserving source positions and literal metadata values.
+- Added `&`-triggered metadata completion for `&title=`, `&artist=`, `&des=`, `&bpm=`, and `&first=`. Accepting a key inserts it and leaves the cursor after `=`, with no pre-filled value.
+- Limited completion to metadata keys: the per-note templates and the note-type snippets (`tap`, `break`, `hold`, `slide`, `wifi`, `touch`, `firework`, `touchhold`) were removed. The chart-header, BPM-change, and divisor snippets remain.
+- Reported unknown Note tokens, incomplete Slide paths, invalid timing values, and malformed MA2 records instead of skipping content or producing invalid times. Valid zero-duration notes remain supported.
+- Located parser errors on the relevant source line or token in the Problems panel. Diagnostics cover every difficulty while the document is edited and no longer require an open preview; a section that never declares a valid BPM is reported on its `&inote_n=` declaration line.
+- Treated Simai `E` as the chart end marker.
+
 ## 0.1.0 - 2026-10-07
 
 - Initial preview release.

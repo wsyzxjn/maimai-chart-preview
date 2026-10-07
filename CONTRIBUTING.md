@@ -17,6 +17,7 @@ The patch under `.yarn/patches/` contains only:
 
 - An optional `soundBaseUrl` for loading Webview-local sound assets.
 - Shared Simai section discovery, custom positive integer section IDs, associated metadata, and explicit declaration errors.
+- Source-preserving Simai comment handling, safe timing/token validation, source locations in parser errors, and MA2 record validation. Existing valid zero-duration records stay compatible.
 
 Do not change the upstream Touch Hold single-voice scheduling or the original Hi-Speed range of 3.0–9.0. Playback caret feedback and SE mute recovery are handled by the extension.
 

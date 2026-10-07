@@ -36,7 +36,7 @@ test("detects MA2 from combined headers and records or a version declaration",()
 });
 
 test("leaves unrelated text, isolated metadata and fenced examples untouched",()=>{
-  for (const text of ["ordinary notes 1, 2, 3", "&title=Meeting\n&artist=Someone", "&bpm=120", "RESOLUTION 384\nBPM_DEF 120", "# NMTAP 0 0 1", '```simai\n&bpm=120\n&inote_4=\n1,2,\n```']) {
+  for (const text of ["ordinary notes 1, 2, 3", "&title=Meeting\n&artist=Someone", "&bpm=120", "RESOLUTION 384\nBPM_DEF 120", "# NMTAP 0 0 1", '```simai\n&bpm=120\n&inote_4=\n1,2,\n```', '/*\n&bpm=120\n&inote_5=\n1,2,\n*/']) {
     assert.equal(detectChartFormat(text),null,text);
   }
   assert.equal(detectChartFormat("x".repeat(65536)+"\n&bpm=120\n&inote_4=\n1,2,"),null);

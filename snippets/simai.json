@@ -24,45 +24,5 @@
     "prefix": "div",
     "body": "{${1:4}}",
     "description": "Beat divisor change {4}, {8}, {16}, etc."
-  },
-  "Tap Note": {
-    "prefix": "tap",
-    "body": "${1:1},",
-    "description": "Button Tap note"
-  },
-  "Break Note": {
-    "prefix": "break",
-    "body": "${1:1}b,",
-    "description": "Break Tap note"
-  },
-  "Hold Note": {
-    "prefix": "hold",
-    "body": "${1:1}h[${2:4}:${3:1}],",
-    "description": "Hold note [divisor:beats]"
-  },
-  "Slide Note": {
-    "prefix": "slide",
-    "body": "${1:1}-${2:5}[${3:4}:${4:1}],",
-    "description": "Straight slide note"
-  },
-  "Wifi Slide": {
-    "prefix": "wifi",
-    "body": "${1:1}w[${2:4}:${3:1}],",
-    "description": "Wifi slide note"
-  },
-  "Touch Note": {
-    "prefix": "touch",
-    "body": "${1:C},",
-    "description": "Touch note"
-  },
-  "Touch Firework": {
-    "prefix": "firework",
-    "body": "${1:C}f,",
-    "description": "Touch Firework note"
-  },
-  "Touch Hold": {
-    "prefix": "touchhold",
-    "body": "${1:C}h[${2:4}:${3:1}],",
-    "description": "Touch Hold note"
   }
 }

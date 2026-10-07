@@ -38,6 +38,7 @@ Simai 的 `&inote_1..6` 对应 EASY、BASIC、ADVANCED、EXPERT、MASTER、Re:MA
   - 已移除。共享引擎的 `AudioManager` 是唯一音效调度实现。
 - `src/parser/sourceMap.ts`
   - 建立编辑器行号与 Beat 的映射，供光标定位和播放时反向跟随使用。
+  - 注释与段落解析复用引擎 `readSimaiSections` 的清理后正文，注释用等长空格屏蔽，必须保留原始行列。评论中假 metadata/Note 不得影响段落、时间或光标。引擎解析错误携带 line/column/length，Problems 优先定位记号并通过 doc.validateRange 裁剪；没有位置才回退整个文档。
 - `src/parser/chartFormat.ts`、`src/languageDetection.ts`
   - 前者仅用多行组合特征判别格式，不能另造 Note 解析器；后者通过官方 `setTextDocumentLanguage` 为已打开的 plaintext `.txt` 启用对应语言。只读取前 64 KiB，不扫描工作区，编辑检测防抖 200ms，`autoDetectCharts` 可以关闭。`files.associations`、其他语言模式及本会话内手动语言变更优先；必须防止语言更改引起的 close/open 递归，不因为正文暂时错误而取消语言。
 - `src/types/protocol.ts`
@@ -80,7 +81,9 @@ yarn typecheck
 yarn build
 ```
 
-引擎通过固定 Git 提交的 workspace 依赖安装，`.yarn/patches/` 只包含资源 URL 适配及自定义 Simai 段落支持。不能再硬编码相邻 checkout 路径。更新引擎和补丁按 `CONTRIBUTING.md` 执行。
+引擎通过固定 Git 提交的 workspace 依赖安装，`.yarn/patches/` 包含资源 URL 适配、自定义 Simai 段落、等长注释屏蔽和可定位的解析/参数校验。保持单一补丁，不能直接手改 node_modules，也不能硬编码相邻 checkout 路径。更新引擎和补丁按 `CONTRIBUTING.md` 执行。
+
+诊断目前仍由打开的预览为所选谱面计算。完整实时诊断和上下文补全尚未实现；扩展时用官方 DiagnosticCollection/CompletionItemProvider，复用引擎规则，不能另造第二个 Note 解析器。零时长 Hold/Slide 保持兼容；BPM、分拍及延迟 BPM 必须正值，未知/字段缺失不能静默跳过。
 
 如需要在上游 checkout 验证音频改动，相关测试从前端仓库运行：
 

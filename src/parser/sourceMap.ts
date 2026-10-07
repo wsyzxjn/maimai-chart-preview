@@ -39,6 +39,7 @@ export function buildSimaiSourceMap(
     let col = 0;
     while (col < trimmed.length) {
       const char = trimmed[col];
+      if (char === "E" && /(?:^|,)\s*$/.test(trimmed.slice(0, col)) && /^(?:\s*,|\s*$)/.test(trimmed.slice(col + 1))) return entries;
       if (char === "{") {
         const divMatch = trimmed.slice(col).match(/^\{(\d+(?:\.\d+)?)\}/);
         if (divMatch) {
@@ -71,7 +72,7 @@ export function findSimaiDifficultyByLine(text: string, targetLine: number): num
   if (!source.hasSectionDeclarations) {
     return source.body.some((line) => line.line === targetLine && line.text.trim() !== "") ? 4 : null;
   }
-  return source.sections.find((section) => section.body.some((line) => line.line === targetLine))?.id ?? null;
+  return source.sections.find((section) => section.body.some((line) => line.line === targetLine && line.text.trim() !== ""))?.id ?? null;
 }
 
 /** MA2 records contain explicit bar/tick positions; headers have no playhead position. */

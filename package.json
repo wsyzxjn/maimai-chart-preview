@@ -2,7 +2,7 @@
   "name": "maimai-chart-preview",
   "displayName": "maimai Chart Preview",
   "description": "Play and preview maimai DX Simai and MA2 charts in Visual Studio Code",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "amatsuka",
   "author": {
     "name": "Amatsuka"
@@ -28,11 +28,6 @@
     "node": ">=22.14.0"
   },
   "activationEvents": [
-    "onCommand:maimai.openPreview",
-    "onCommand:maimai.openPreviewToSide",
-    "onLanguage:simai",
-    "onLanguage:ma2",
-    "onCommand:maimai.playFromCursor",
     "onLanguage:plaintext"
   ],
   "categories": [
@@ -225,6 +220,7 @@
   "devDependencies": {
     "@lxns-network/maimai-chart-engine": "patch:@lxns-network/maimai-chart-engine@https%3A//github.com/Lxns-Network/maimai-prober-frontend.git%23workspace=%2540lxns-network%252Fmaimai-chart-engine&commit=6614ff5a96cbc56175b7595d6ea9bb6cbdc28f95#~/.yarn/patches/@lxns-network-maimai-chart-engine-https-becd065466.patch",
     "@types/node": "24.13.3",
+    "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "4.0.0",
     "esbuild": "0.28.0",
     "typescript": "5.9.3"

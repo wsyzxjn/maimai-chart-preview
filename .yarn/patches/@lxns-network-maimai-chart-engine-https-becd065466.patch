@@ -51,6 +51,30 @@ index 310ec9b44ad2c8a7644595105027a7fc40f195b2..e880ff8ac0416b742c47a3aff455052d
    type ChartFileType,
    default as ChartParser,
  } from "./parser/ChartParser";
+diff --git a/src/core/parser/ChartParseError.ts b/src/core/parser/ChartParseError.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..a2a1ffa8cb18b033407f0050fb13fff89bcf121f
+--- /dev/null
++++ b/src/core/parser/ChartParseError.ts
+@@ -0,0 +1,18 @@
++export class ChartParseError extends Error {
++  readonly line?: number;
++  readonly column?: number;
++  readonly offset?: number;
++  readonly length: number;
++
++  constructor(
++    message: string,
++    location: { line?: number; column?: number; offset?: number; length?: number } = {},
++  ) {
++    super(message);
++    this.name = "ChartParseError";
++    this.line = location.line;
++    this.column = location.column;
++    this.offset = location.offset;
++    this.length = location.length ?? 1;
++  }
++}
 diff --git a/src/core/parser/ChartParser.ts b/src/core/parser/ChartParser.ts
 index 205bb01086ec717747c139b327e01ada516c8775..64bb9c5ee035c287636aba2b3934e1df1e6565c6 100644
 --- a/src/core/parser/ChartParser.ts
@@ -61,8 +85,119 @@ index 205bb01086ec717747c139b327e01ada516c8775..64bb9c5ee035c287636aba2b3934e1df
  export { getAvailableDifficulties, parseSimaiChart } from "./SimaiParser";
 +export { readSimaiSections } from "./SimaiSections";
  export { parseSimaiChart as default } from "./SimaiParser";
+diff --git a/src/core/parser/Ma2Parser.ts b/src/core/parser/Ma2Parser.ts
+index 93f8d5483a3189516327cee8adba8645e8a71068..362efe5ed174ee6393e8d80f5dfc15d0d22438f6 100644
+--- a/src/core/parser/Ma2Parser.ts
++++ b/src/core/parser/Ma2Parser.ts
+@@ -18,6 +18,7 @@ import type {
+   ButtonPosition,
+   TouchPosition,
+ } from "../../types";
++import { ChartParseError } from "./ChartParseError";
+ import { isUpperHalf } from "../../utils/slideAreaSteps";
+ 
+ const SLIDE_COMMANDS = new Set([
+@@ -170,13 +171,25 @@ export function parseMa2Chart(ma2Text: string, difficulty: ChartDifficulty): Cha
+ 
+     switch (cmd) {
+       case "RESOLUTION": {
+-        const val = Number.parseInt(tokens[1], 10);
+-        if (!Number.isNaN(val)) resolution = val;
++        const val = Number(tokens[1]);
++        if (!Number.isSafeInteger(val) || val <= 0)
++          throw new ChartParseError("RESOLUTION 必须是正整数", {
++            line: i,
++            column: 0,
++            length: line.length,
++          });
++        resolution = val;
+         break;
+       }
+       case "BPM_DEF": {
+-        const val = Number.parseFloat(tokens[1]);
+-        if (!Number.isNaN(val)) initialBpm = val;
++        const val = Number(tokens[1]);
++        if (!Number.isFinite(val) || val <= 0)
++          throw new ChartParseError("BPM_DEF 必须是有限正数", {
++            line: i,
++            column: 0,
++            length: line.length,
++          });
++        initialBpm = val;
+         break;
+       }
+       case "CREATOR":
+@@ -215,9 +228,66 @@ export function parseMa2Chart(ma2Text: string, difficulty: ChartDifficulty): Cha
+     if (line === "" || line.startsWith("#")) continue;
+ 
+     const tokens = line.split(/\s+/);
+-    if (tokens.length < 3) continue;
+-
+     const cmd = tokens[0].toUpperCase();
++    const mainCommand = cmd.substring(2);
++    const timingCommand = cmd === "BPM" || cmd === "MET";
++    const noteCommand = /^(?:NM|BR|EX|BX|CN)/.test(cmd) && RECORD_COMMANDS.has(mainCommand);
++    const fail = (message: string): never => {
++      throw new ChartParseError(`${cmd}：${message}`, {
++        line: i,
++        column: lines[i].indexOf(tokens[0]),
++        length: line.length,
++      });
++    };
++    if (!timingCommand && !noteCommand) {
++      if (
++        tokens.length >= 3 &&
++        /^-?\d/.test(tokens[1]) &&
++        /^-?\d/.test(tokens[2]) &&
++        !/^(?:T_REC|T_NUM|T_JUDGE|TTM|TT|TTN|VERSION|BPM_DEF|MET_DEF)/.test(cmd)
++      )
++        fail("不支持的谱面记录指令");
++      continue;
++    }
++    const fields = timingCommand
++      ? 4
++      : SLIDE_COMMANDS.has(mainCommand) || mainCommand === "THO"
++        ? 7
++        : mainCommand === "TTP"
++          ? 6
++          : mainCommand === "HLD"
++            ? 5
++            : 4;
++    if (tokens.length < fields) fail(`字段不足，需要至少 ${fields} 列，收到 ${tokens.length} 列`);
++    const integer = (index: number, min: number, max = Number.MAX_SAFE_INTEGER): number => {
++      const value = Number(tokens[index]);
++      if (!Number.isSafeInteger(value) || value < min || value > max)
++        fail(`第 ${index + 1} 列必须是 ${min}～${max} 的整数`);
++      return value;
++    };
++    integer(1, 0);
++    integer(2, 0);
++    if (timingCommand) {
++      const value = Number(tokens[3]);
++      if (!Number.isFinite(value) || value <= 0) fail("BPM/拍数必须是有限正数");
++      if (cmd === "MET") {
++        integer(3, 1);
++        if (tokens[4] !== undefined) integer(4, 1);
++      }
++    } else {
++      integer(3, 0, 7);
++      if (mainCommand === "HLD" || mainCommand === "THO") integer(4, 0);
++      if (SLIDE_COMMANDS.has(mainCommand)) {
++        integer(4, 0);
++        integer(5, 0);
++        integer(6, 0, 7);
++      }
++      if (mainCommand === "TTP" || mainCommand === "THO") {
++        const regionIndex = mainCommand === "TTP" ? 4 : 5;
++        if (!/^[ABCDE]$/i.test(tokens[regionIndex])) fail("Touch 区域必须为 A/B/C/D/E");
++        integer(regionIndex + 1, 0, 1);
++      }
++    }
+ 
+     if (cmd === "BPM") {
+       const bar = Number.parseInt(tokens[1], 10);
 diff --git a/src/core/parser/SimaiParser.ts b/src/core/parser/SimaiParser.ts
-index 03516b01e925e7ef84520d4e29a9b7a14f8e005c..c58db0b985e554556c099ab09935d7cb04f0a8cf 100644
+index 03516b01e925e7ef84520d4e29a9b7a14f8e005c..b2c31648ce41cf37949a17d7eaf2aa8e20bcba94 100644
 --- a/src/core/parser/SimaiParser.ts
 +++ b/src/core/parser/SimaiParser.ts
 @@ -2,9 +2,7 @@ import { match } from "ts-pattern";
@@ -75,15 +210,16 @@ index 03516b01e925e7ef84520d4e29a9b7a14f8e005c..c58db0b985e554556c099ab09935d7cb
    AvailableDifficulties,
    Note,
    TapNote,
-@@ -21,6 +19,7 @@ import {
+@@ -21,6 +19,8 @@ import {
    ButtonPosition,
    TouchPosition,
  } from "../../types";
++import { ChartParseError } from "./ChartParseError";
 +import { readSimaiSections } from "./SimaiSections";
  
  interface ParseNotesResult {
    notes: Note[];
-@@ -29,26 +28,6 @@ interface ParseNotesResult {
+@@ -29,26 +29,6 @@ interface ParseNotesResult {
    divisorEvents: DivisorEvent[];
  }
  
@@ -110,7 +246,7 @@ index 03516b01e925e7ef84520d4e29a9b7a14f8e005c..c58db0b985e554556c099ab09935d7cb
  function isWhitespace(char: string): boolean {
    return char === " " || char === "\t" || char === "\r" || char === "\n";
  }
-@@ -63,25 +42,17 @@ function isMultiDigitNote(noteStr: string): boolean {
+@@ -63,25 +43,17 @@ function isMultiDigitNote(noteStr: string): boolean {
  
  /**
   * 探测谱面里包含哪些可用难度。
@@ -143,7 +279,7 @@ index 03516b01e925e7ef84520d4e29a9b7a14f8e005c..c58db0b985e554556c099ab09935d7cb
      if (hasChartContent) {
        available[4] = true;
      }
-@@ -96,16 +67,15 @@ export function getAvailableDifficulties(simaiText: string): AvailableDifficulti
+@@ -96,16 +68,15 @@ export function getAvailableDifficulties(simaiText: string): AvailableDifficulti
   * 未指定难度时默认挑最高可用难度，单难度谱面回退到难度 4。
   * 开头会自动垫 1 小节（4 拍）前奏偏移。
   *
@@ -164,13 +300,14 @@ index 03516b01e925e7ef84520d4e29a9b7a14f8e005c..c58db0b985e554556c099ab09935d7cb
      throw new Error("Invalid simai format: expected & metadata lines (e.g. &title=, &inote_4=)");
    }
  
-@@ -120,48 +90,14 @@ export function parseSimaiChart(simaiText: string, difficulty?: ChartDifficulty)
+@@ -120,48 +91,29 @@ export function parseSimaiChart(simaiText: string, difficulty?: ChartDifficulty)
      inotes: {},
    };
  
 -  let currentInote: number | null = null;
 -  let currentInoteContent: string[] = [];
 -
++  let bodyLines = source.body;
    try {
 -    for (let i = 0; i < lines.length; i++) {
 -      const line = lines[i];
@@ -204,23 +341,35 @@ index 03516b01e925e7ef84520d4e29a9b7a14f8e005c..c58db0b985e554556c099ab09935d7cb
 -
 -      if (trimmedLine.startsWith("&")) {
 -        parseMetadataLine(trimmedLine, metadata);
--      }
--    }
++    if (source.error)
++      throw new ChartParseError(source.error, {
++        line: source.errorLine,
++        column: source.errorColumn,
++      });
++    if (difficulty !== undefined && (!Number.isSafeInteger(difficulty) || difficulty <= 0))
++      throw new Error("谱面编号必须是正整数");
++    for (const line of source.metadata) {
++      try {
++        parseMetadataLine(line.text, metadata);
++      } catch (error) {
++        throw new ChartParseError(error instanceof Error ? error.message : String(error), {
++          line: line.line,
++          column: line.column,
++          length: line.text.length,
++        });
+       }
+     }
 -
 -    if (currentInote !== null) {
 -      metadata.inotes[currentInote] = currentInoteContent.join("\n");
 -      metadata.availableDifficulties[currentInote as ChartDifficulty] = true;
-+    if (source.error) throw new Error(source.error);
-+    if (difficulty !== undefined && (!Number.isSafeInteger(difficulty) || difficulty <= 0))
-+      throw new Error("谱面编号必须是正整数");
-+    for (const line of source.metadata) parseMetadataLine(line, metadata);
 +    for (const section of source.sections) {
 +      metadata.inotes[section.id] = section.body.map((line) => line.text).join("\n");
 +      metadata.availableDifficulties[section.id] = true;
      }
  
      let selectedDifficulty = difficulty;
-@@ -169,27 +105,30 @@ export function parseSimaiChart(simaiText: string, difficulty?: ChartDifficulty)
+@@ -169,27 +121,31 @@ export function parseSimaiChart(simaiText: string, difficulty?: ChartDifficulty)
        .map(Number)
        .sort((a, b) => b - a);
  
@@ -237,6 +386,7 @@ index 03516b01e925e7ef84520d4e29a9b7a14f8e005c..c58db0b985e554556c099ab09935d7cb
 +      selectedDifficulty !== undefined &&
 +      Object.prototype.hasOwnProperty.call(metadata.inotes, selectedDifficulty)
 +    ) {
++      bodyLines = source.sections.find((section) => section.id === selectedDifficulty)!.body;
        chartBody = metadata.inotes[selectedDifficulty];
      } else if (availableDiffs.length === 0) {
 -      for (let i = 0; i < lines.length; i++) {
@@ -261,7 +411,7 @@ index 03516b01e925e7ef84520d4e29a9b7a14f8e005c..c58db0b985e554556c099ab09935d7cb
  
      const designerKey = `des_${selectedDifficulty}` as keyof ChartDesigners;
      const selectedDesigner = metadata.designers[designerKey] || metadata.designer;
-@@ -281,6 +220,7 @@ export function parseSimaiChart(simaiText: string, difficulty?: ChartDifficulty)
+@@ -281,6 +237,7 @@ export function parseSimaiChart(simaiText: string, difficulty?: ChartDifficulty)
        level: metadata.level,
        designers: metadata.designers,
        difficulty: selectedDifficulty,
@@ -269,7 +419,30 @@ index 03516b01e925e7ef84520d4e29a9b7a14f8e005c..c58db0b985e554556c099ab09935d7cb
        availableDifficulties: metadata.availableDifficulties,
        measures: maxMeasure + 2, // 前后各留 1 小节缓冲
        notes,
-@@ -299,8 +239,16 @@ function parseMetadataLine(line: string, metadata: ChartMetadata): void {
+@@ -289,6 +246,22 @@ export function parseSimaiChart(simaiText: string, difficulty?: ChartDifficulty)
+       firstMs: metadata.firstSec !== undefined ? metadata.firstSec * 1000 : undefined,
+     };
+   } catch (error) {
++    if (error instanceof ChartParseError) {
++      if (error.offset !== undefined) {
++        let offset = 0;
++        for (const line of bodyLines) {
++          if (error.offset <= offset + line.text.length) {
++            throw new ChartParseError(`第 ${line.line + 1} 行：${error.message}`, {
++              line: line.line,
++              column: line.column + error.offset - offset,
++              length: error.length,
++            });
++          }
++          offset += line.text.length + 1;
++        }
++      }
++      throw error;
++    }
+     const message = error instanceof Error ? error.message : String(error);
+     throw new Error(`Parse error: ${message}`);
+   }
+@@ -299,8 +272,16 @@ function parseMetadataLine(line: string, metadata: ChartMetadata): void {
    const eqIndex = line.indexOf("=");
    if (eqIndex === -1) return;
  
@@ -287,7 +460,7 @@ index 03516b01e925e7ef84520d4e29a9b7a14f8e005c..c58db0b985e554556c099ab09935d7cb
  
    switch (key) {
      case "title":
-@@ -312,22 +260,6 @@ function parseMetadataLine(line: string, metadata: ChartMetadata): void {
+@@ -312,34 +293,16 @@ function parseMetadataLine(line: string, metadata: ChartMetadata): void {
      case "des":
        metadata.designer = value;
        break;
@@ -308,16 +481,287 @@ index 03516b01e925e7ef84520d4e29a9b7a14f8e005c..c58db0b985e554556c099ab09935d7cb
 -      metadata.level[key as keyof ChartLevels] = value;
 -      break;
      case "bpm": {
-       const bpmVal = parseFloat(value);
-       if (!isNaN(bpmVal)) {
+-      const bpmVal = parseFloat(value);
+-      if (!isNaN(bpmVal)) {
+-        metadata.bpm = bpmVal;
+-      }
++      const bpmVal = Number(value);
++      if (!Number.isFinite(bpmVal) || bpmVal <= 0) throw new Error("BPM 必须是有限正数");
++      metadata.bpm = bpmVal;
+       break;
+     }
+     case "first": {
+-      const firstVal = parseFloat(value);
+-      if (!isNaN(firstVal)) {
+-        metadata.firstSec = firstVal;
+-      }
++      const firstVal = Number(value);
++      if (value === "" || !Number.isFinite(firstVal)) throw new Error("first 必须是有限秒数");
++      metadata.firstSec = firstVal;
+       break;
+     }
+   }
+@@ -374,6 +337,7 @@ function parseNotes(chartBody: string, initialBpm: number): ParseNotesResult {
+     if (pos >= chartBody.length) break;
+ 
+     let noteContent = "";
++    const noteOffsets: number[] = [];
+     const startPos = pos;
+ 
+     while (pos < chartBody.length && chartBody[pos] !== ",") {
+@@ -385,17 +349,28 @@ function parseNotes(chartBody: string, initialBpm: number): ParseNotesResult {
+       if (char === "(") {
+         const bpmMatch = chartBody.slice(pos).match(/^\((\d+(?:\.\d+)?)\)/);
+         if (bpmMatch) {
+-          currentBpm = parseFloat(bpmMatch[1]);
++          currentBpm = Number(bpmMatch[1]);
++          if (!Number.isFinite(currentBpm) || currentBpm <= 0)
++            throw new ChartParseError("BPM 必须大于 0", {
++              offset: pos,
++              length: bpmMatch[0].length,
++            });
+           if (firstBpm === null) firstBpm = currentBpm;
+           bpmEvents.push({ timing: currentBeat, bpm: currentBpm });
+           pos += bpmMatch[0].length;
+           continue;
+         }
++        throw new ChartParseError("BPM 记号无效或未闭合", { offset: pos });
+       }
+       if (char === "{") {
+         const divisorMatch = chartBody.slice(pos).match(/^\{(\d+(?:\.\d+)?)\}/);
+         if (divisorMatch) {
+-          const newDivisor = parseFloat(divisorMatch[1]);
++          const newDivisor = Number(divisorMatch[1]);
++          if (!Number.isFinite(newDivisor) || newDivisor <= 0)
++            throw new ChartParseError("分拍值必须大于 0", {
++              offset: pos,
++              length: divisorMatch[0].length,
++            });
+           if (newDivisor !== divisor) {
+             divisor = newDivisor;
+             divisorEvents.push({ timing: currentBeat, divisor });
+@@ -403,15 +378,22 @@ function parseNotes(chartBody: string, initialBpm: number): ParseNotesResult {
+           pos += divisorMatch[0].length;
+           continue;
+         }
++        throw new ChartParseError("分拍记号无效或未闭合", { offset: pos });
+       }
+       if (char === "<") {
+         const hsMatch = chartBody.slice(pos).match(/^<HS\*([-+]?\d*\.?\d+)>/i);
+         if (hsMatch) {
+-          currentHiSpeed = parseFloat(hsMatch[1]);
++          currentHiSpeed = Number(hsMatch[1]);
++          if (!Number.isFinite(currentHiSpeed) || currentHiSpeed === 0)
++            throw new ChartParseError("谱内 HS 必须为有限非零值", {
++              offset: pos,
++              length: hsMatch[0].length,
++            });
+           pos += hsMatch[0].length;
+           continue;
+         }
+       }
++      noteOffsets.push(pos);
+       noteContent += char;
+       pos++;
+     }
+@@ -421,38 +403,44 @@ function parseNotes(chartBody: string, initialBpm: number): ParseNotesResult {
+       continue;
+     }
+ 
++    if (noteContent.trim() === "E") break;
++    if (!Number.isFinite(currentBpm) || currentBpm <= 0)
++      throw new ChartParseError("谱面缺少有效 BPM", { offset: startPos });
+     const beatIncrement = 4 / divisor;
+ 
+     if (noteContent.trim() !== "") {
+       const measure = Math.floor(currentBeat / 4);
+       const positionInMeasure = Math.floor(((currentBeat % 4) / 4) * 512);
+ 
+-      const noteGroups: string[] = [];
++      const noteGroups: { text: string; offset: number }[] = [];
+       let currentGroup = "";
++      let groupOffset = noteOffsets[0] ?? startPos;
+ 
+       for (let i = 0; i < noteContent.length; i++) {
+         if (noteContent[i] === "`") {
+           if (currentGroup.trim() !== "") {
+-            noteGroups.push(currentGroup.trim());
++            noteGroups.push({ text: currentGroup.trim(), offset: groupOffset });
+           }
+           currentGroup = "`";
++          groupOffset = noteOffsets[i];
+         } else if (noteContent[i] === "/") {
+           if (currentGroup.trim() !== "") {
+-            noteGroups.push(currentGroup.trim());
++            noteGroups.push({ text: currentGroup.trim(), offset: groupOffset });
+           }
+           currentGroup = "";
++          groupOffset = noteOffsets[i + 1] ?? startPos;
+         } else {
+           currentGroup += noteContent[i];
+         }
+       }
+       if (currentGroup.trim() !== "") {
+-        noteGroups.push(currentGroup.trim());
++        noteGroups.push({ text: currentGroup.trim(), offset: groupOffset });
+       }
+ 
+       const isSimultaneous = noteGroups.length > 1;
+ 
+       for (const group of noteGroups) {
+-        let noteStr = group.trim();
++        let noteStr = group.text.trim();
+         if (noteStr === "") continue;
+ 
+         let hasDelayMarker = false;
+@@ -461,16 +449,57 @@ function parseNotes(chartBody: string, initialBpm: number): ParseNotesResult {
+           noteStr = noteStr.substring(1);
+         }
+ 
+-        const parsedNotes = parseNoteString(
+-          noteStr,
+-          currentBeat,
+-          currentMs,
+-          measure,
+-          positionInMeasure,
+-          currentBpm,
+-          isSimultaneous,
+-          hasDelayMarker,
+-        );
++        let parsedNotes: Note[];
++        try {
++          validateDurationNotation(noteStr);
++          parsedNotes = parseNoteString(
++            noteStr,
++            currentBeat,
++            currentMs,
++            measure,
++            positionInMeasure,
++            currentBpm,
++            isSimultaneous,
++            hasDelayMarker,
++          );
++          if (!parsedNotes.length) throw new Error(`无法识别的 Note：${noteStr}`);
++          for (const note of parsedNotes) {
++            if (note.type === "slide") {
++              const paths = note.allSlideSegments ?? [note.slideSegments];
++              if (
++                !paths.length ||
++                paths.some(
++                  (path) =>
++                    !path.length ||
++                    path.some(
++                      (segment) =>
++                        segment.startPos < 1 ||
++                        segment.startPos > 8 ||
++                        segment.endPos < 1 ||
++                        segment.endPos > 8 ||
++                        (segment.midPos !== undefined &&
++                          (segment.midPos < 1 || segment.midPos > 8)),
++                    ),
++                )
++              )
++                throw new Error(`Slide 路径或终点无效：${noteStr}`);
++              if (
++                [
++                  ...(note.allDurationMs ?? [note.durationMs]),
++                  ...(note.allDelayMs ?? [note.delayMs]),
++                ].some((value) => !Number.isFinite(value) || value < 0)
++              )
++                throw new Error(`Slide 时间无效：${noteStr}`);
++            }
++            if (!Number.isFinite(note.timingMs) || !Number.isFinite(note.timing))
++              throw new Error(`Note 时间无效：${noteStr}`);
++          }
++        } catch (error) {
++          throw new ChartParseError(error instanceof Error ? error.message : String(error), {
++            offset: group.offset,
++            length: group.text.length,
++          });
++        }
+ 
+         if (currentHiSpeed !== 1) {
+           for (const note of parsedNotes) note.hiSpeed = currentHiSpeed;
+@@ -495,6 +524,40 @@ function parseNotes(chartBody: string, initialBpm: number): ParseNotesResult {
+   };
+ }
+ 
++function validateDurationNotation(token: string): void {
++  const number = "(?:\\d+(?:\\.\\d+)?|\\.\\d+)";
++  let index = 0;
++  while (index < token.length) {
++    if (token[index] === "]") throw new Error(`多余的 ]：${token}`);
++    if (token[index++] !== "[") continue;
++    const end = token.indexOf("]", index);
++    if (end === -1) throw new Error(`时长记号未闭合：${token}`);
++    const timing = token.slice(index, end);
++    let values: number[];
++    let positiveValues: number[] = [];
++    const seconds = timing.match(new RegExp(`^(${number})##(${number})$`));
++    const onlySeconds = timing.match(new RegExp(`^#(${number})$`));
++    const beats = timing.match(
++      new RegExp(`^(?:(${number})#)?(${number}):(${number})(?:##(${number}))?$`),
++    );
++    if (seconds) {
++      const delay = Number(seconds[1]);
++      if (!Number.isFinite(delay) || delay < 0) throw new Error(`延迟秒数无效：${token}`);
++      values = [Number(seconds[2])];
++    } else if (onlySeconds) values = [Number(onlySeconds[1])];
++    else if (beats) {
++      values = [Number(beats[3]), ...(beats[4] === undefined ? [] : [Number(beats[4])])];
++      positiveValues = [Number(beats[2]), ...(beats[1] === undefined ? [] : [Number(beats[1])])];
++    } else throw new Error(`时长记号无效：${token}`);
++    if (
++      values.some((value) => !Number.isFinite(value) || value < 0) ||
++      positiveValues.some((value) => !Number.isFinite(value) || value <= 0)
++    )
++      throw new Error(`时长不能为负，分拍及延迟 BPM 必须大于 0：${token}`);
++    index = end + 1;
++  }
++}
++
+ /** 计算 Hold 持续拍数，支持 `[分频:拍数]` 和 `[#秒数]` 两种记号。 */
+ function parseHoldDuration(
+   divisor: string | undefined,
+@@ -611,6 +674,9 @@ function parseNoteString(
+       const hasBreak = /[-><^vpqszVw]\d*b/i.test(part) || /\]b/i.test(part);
+       allSlideBreaks.push(hasBreak);
+ 
++      const pathToken = part.replace(/\[[^\]]*\]/g, "");
++      if (!/^[bx?!@]*(?:(?:pp|qq|[-><^vpqszw])[1-8][bx]*|V[1-8]{2}[bx]*)+$/.test(pathToken))
++        throw new Error(`Slide 路径无效：${noteStr}`);
+       const hasMultipleTimings = (part.match(/\[[\d.:#+]+\]/g) || []).length > 1;
+ 
+       if (hasMultipleTimings) {
+@@ -668,9 +734,7 @@ function parseNoteString(
+         allDelayMs.push(delayMsValue);
+         allCustomLengths.push(customDurationSeconds);
+ 
+-        const pathOnly = part
+-          .replace(/\[(?:(?:[\d.]+#)?[\d.]+:[\d.]+(?:##[\d.]+)?|[\d.]+##[\d.]+)\]/gi, "")
+-          .replace(/[bx]/gi, "");
++        const pathOnly = part.replace(/\[[^\]]*\]/g, "").replace(/[bx]/gi, "");
+ 
+         const segments = parseSlideSegments(startPosition, pathOnly);
+         allSlideSegments.push(segments);
+@@ -766,6 +830,8 @@ function parseNoteString(
+       const touchPosition = (sensorNum ? `${region}${sensorNum}` : region) as TouchPosition;
+       const isHold = modifiers.includes("h");
+       const hasFirework = modifiers.includes("f");
++      if (isHold && !(touchMatch[4] || touchMatch[6]))
++        throw new Error(`Touch Hold 缺少时长：${noteStr}`);
+ 
+       if (isHold && (touchMatch[4] || touchMatch[6])) {
+         const holdDuration = parseHoldDuration(touchMatch[4], touchMatch[5], touchMatch[6], bpm);
 diff --git a/src/core/parser/SimaiSections.ts b/src/core/parser/SimaiSections.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..eddbb01e6a5af62f274dd7f2bc9bdf8c7e4ada63
+index 0000000000000000000000000000000000000000..ae9312f872d3cfa754ecd50114d98ac21af9c3ff
 --- /dev/null
 +++ b/src/core/parser/SimaiSections.ts
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,101 @@
 +export interface SimaiSourceLine {
 +  line: number;
++  column: number;
 +  text: string;
 +}
 +
@@ -333,48 +777,88 @@ index 0000000000000000000000000000000000000000..eddbb01e6a5af62f274dd7f2bc9bdf8c
 + */
 +export function readSimaiSections(text: string): {
 +  sections: SimaiSection[];
-+  metadata: string[];
++  metadata: SimaiSourceLine[];
 +  body: SimaiSourceLine[];
 +  hasSectionDeclarations: boolean;
 +  error?: string;
++  errorLine?: number;
++  errorColumn?: number;
 +} {
 +  const sections: SimaiSection[] = [];
-+  const metadata: string[] = [];
++  const metadata: SimaiSourceLine[] = [];
 +  const body: SimaiSourceLine[] = [];
 +  const ids = new Set<number>();
 +  let current: SimaiSection | undefined;
 +  let hasSectionDeclarations = false;
 +  let error: string | undefined;
++  let errorLine: number | undefined;
++  let errorColumn: number | undefined;
++  let blockStart: { line: number; column: number } | undefined;
 +
 +  for (const [line, raw] of text
-+    .replace(/^\uFEFF/, "")
++    .replace(/^\uFEFF/, " ")
 +    .split(/\r?\n/)
 +    .entries()) {
-+    const trimmed = raw.trim();
++    let cleaned = raw;
++    if (blockStart || !raw.trimStart().startsWith("&") || /^\s*&inote/i.test(raw)) {
++      const chars = raw.split("");
++      for (let column = 0; column < raw.length; column++) {
++        if (blockStart) {
++          chars[column] = " ";
++          if (raw.slice(column, column + 2) === "*/") {
++            chars[++column] = " ";
++            blockStart = undefined;
++          }
++        } else if (raw.slice(column, column + 2) === "//") {
++          chars.fill(" ", column);
++          break;
++        } else if (raw.slice(column, column + 2) === "/*") {
++          blockStart = { line, column };
++          chars[column] = " ";
++          chars[++column] = " ";
++        }
++      }
++      cleaned = chars.join("");
++    }
++    const trimmed = cleaned.trim();
 +    if (/^&inote/i.test(trimmed)) {
 +      hasSectionDeclarations = true;
 +      current = undefined;
 +      const match = trimmed.match(/^&inote_([1-9]\d*)\s*=(.*)$/i);
 +      const id = match ? Number(match[1]) : Number.NaN;
 +      if (!match || !Number.isSafeInteger(id)) {
++        if (!error) {
++          errorLine = line;
++          errorColumn = Math.max(0, cleaned.indexOf("&"));
++        }
 +        error ??= `第 ${line + 1} 行的谱面段落声明无效：${trimmed}（需要 &inote_正整数=）`;
 +        continue;
 +      }
 +      if (ids.has(id)) {
++        if (!error) {
++          errorLine = line;
++          errorColumn = Math.max(0, cleaned.indexOf("&"));
++        }
 +        error ??= `第 ${line + 1} 行重复声明谱面 ${id}`;
 +        continue;
 +      }
 +      ids.add(id);
-+      current = { id, line, body: [{ line, text: match[2] }] };
++      const column = cleaned.indexOf("=") + 1;
++      current = { id, line, body: [{ line, column, text: cleaned.slice(column) }] };
 +      sections.push(current);
 +    } else if (trimmed.startsWith("&")) {
 +      current = undefined;
-+      metadata.push(trimmed);
++      metadata.push({ line, column: Math.max(0, cleaned.indexOf("&")), text: trimmed });
 +    } else {
-+      (current?.body ?? body).push({ line, text: raw });
++      (current?.body ?? body).push({ line, column: 0, text: cleaned });
 +    }
 +  }
-+  return { sections, metadata, body, hasSectionDeclarations, error };
++  if (blockStart && !error) {
++    errorLine = blockStart.line;
++    errorColumn = blockStart.column;
++    error = `第 ${errorLine + 1} 行的块注释未闭合`;
++  }
++  return { sections, metadata, body, hasSectionDeclarations, error, errorLine, errorColumn };
 +}
 diff --git a/src/types/index.ts b/src/types/index.ts
 index 81295e836cd0b2152aa7d971a3f1b785a387ff5d..47af5b840246d25a1d0b61d2ac4fef078c126a5f 100644

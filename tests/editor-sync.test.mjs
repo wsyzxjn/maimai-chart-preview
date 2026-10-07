@@ -29,8 +29,9 @@ test("playback follows with decorations without seeking, and editor focus preser
   let cursorLine = 9;
   const messages = [];
   const decorations = [];
+  const reportedDiagnostics = [];
   const uri = (value) => ({ fsPath: value, toString: () => value });
-  const document = { uri: uri("/tmp/maimai-sync-test.simai"), fileName: "/tmp/maimai-sync-test.simai", languageId: "simai", lineCount: 10, getText: () => "&bpm=120\n&inote_3=\n1,2,\n&inote_4=\n1,2,\n3,4,\n\n&lv_5=14\n&inote_5=\n5,6," };
+  const document = { uri: uri("/tmp/maimai-sync-test.simai"), fileName: "/tmp/maimai-sync-test.simai", languageId: "simai", lineCount: 10, validateRange: range => range, getText: () => "&bpm=120\n&inote_3=\n1,2,\n&inote_4=\n1,2,\n3,4,\n\n&lv_5=14\n&inote_5=\n5,6," };
   class Position { constructor(line, character) { this.line = line; this.character = character; } }
   class Selection { constructor(anchor, active) { this.anchor = anchor; this.active = active; } }
   class Range { constructor(...args) { this.args = args; } }
@@ -53,6 +54,10 @@ test("playback follows with decorations without seeking, and editor focus preser
     onDidReceiveMessage: (callback) => { receive = callback; },
   } };
   const noop = () => ({ dispose() {} });
+  // Several modules register document events; keep every listener so tests can drive them all.
+  const documentListeners = { open: [], change: [], close: [] };
+  const on = (bucket) => (callback) => { documentListeners[bucket].push(callback); return noop(); };
+  const emit = (bucket, event) => { for (const callback of documentListeners[bucket]) callback(event); };
   const vscode = {
     Position, Selection, Range,
     Diagnostic:class { constructor(range,message,severity){this.range=range;this.message=message;this.severity=severity;} },
@@ -60,7 +65,10 @@ test("playback follows with decorations without seeking, and editor focus preser
     ViewColumn: { Active: 1, Beside: 2 },
     TextEditorRevealType: { InCenterIfOutsideViewport: 2 },
     Uri: { file: uri, joinPath: (base, ...parts) => uri(path.join(base.fsPath, ...parts)) },
-    languages: { createDiagnosticCollection: () => ({ ...noop(), delete() {}, set() {} }) },
+    languages: {
+      createDiagnosticCollection: () => ({ ...noop(), delete() {}, set(_uri, entries) { reportedDiagnostics.push(entries); } }),
+      registerCompletionItemProvider: () => noop(),
+    },
     commands: { registerCommand: (id, callback) => { commands.set(id,callback); if (id === "maimai.openPreviewToSide") vscode.open = callback; return noop(); } },
     window: {
       activeTextEditor: editor,
@@ -71,7 +79,15 @@ test("playback follows with decorations without seeking, and editor focus preser
       onDidChangeActiveTextEditor: (callback) => { onActiveEditor = callback; return noop(); },
       onDidChangeTextEditorSelection: (callback) => { onSelection = callback; return noop(); },
     },
-    workspace: { textDocuments: [], onDidOpenTextDocument: noop, onDidCloseTextDocument: noop, workspaceFolders: [], getConfiguration: () => ({ get: (_key, fallback) => fallback }), onDidChangeTextDocument: noop },
+    workspace: {
+      textDocuments: [],
+      workspaceFolders: [],
+      getConfiguration: () => ({ get: (_key, fallback) => fallback }),
+      onDidOpenTextDocument: on("open"),
+      onDidCloseTextDocument: on("close"),
+      onDidSaveTextDocument: noop,
+      onDidChangeTextDocument: on("change"),
+    },
   };
   const original = Module._load;
   try {
@@ -155,6 +171,16 @@ test("playback follows with decorations without seeking, and editor focus preser
     vscode.open();
     assert.match(messages.findLast(m=>m.type==='chartUpdate').error,/谱面段落声明/);
     assert.equal(messages.findLast(m=>m.type==='chartUpdate').chart,null);
+    emit("change", { document });
+    await new Promise((resolve)=>setTimeout(resolve, 400));
+    assert.equal(reportedDiagnostics.at(-1)[0].range.args[0],1,"Invalid section reports the offending line without a preview");
+    document.getText=()=>"&bpm=120\n&inote_5=\n1,\n  typo,";
+    document.lineCount=4;
+    emit("change", { document });
+    await new Promise((resolve)=>setTimeout(resolve, 400));
+    assert.deepEqual(reportedDiagnostics.at(-1)[0].range.args,[3,2,3,6],"Unknown Note reports its actual token range");
+    assert.equal(reportedDiagnostics.at(-1)[0].source,"maimai Chart Preview");
+    emit("close", document);
     disposePanel();
     host.deactivate();
   } finally {

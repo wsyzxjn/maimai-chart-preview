@@ -6,6 +6,8 @@ import { parseSimaiChart, parseMa2Chart, getAvailableDifficulties, readSimaiSect
 import type { ChartDifficulty, ChartFileType } from "@lxns-network/maimai-chart-engine";
 import { detectChartFormat } from "./parser/chartFormat";
 import { registerChartLanguageDetection } from "./languageDetection";
+import { registerChartCompletion } from "./chartCompletion";
+import { registerChartDiagnostics } from "./chartDiagnosticsService";
 import { buildSimaiSourceMap, buildMa2SourceMap, findBeatByLine, findLineByBeat, findSimaiDifficultyByLine, ChartLineMapEntry } from "./parser/sourceMap";
 import type { HostToWebviewMessage, WebviewToHostMessage, WebviewAssetUris } from "./types/protocol";
 
@@ -47,6 +49,8 @@ export function activate(context: vscode.ExtensionContext) {
   followPlayback = extensionState.get("followPlayback", true);
   diagnostics = vscode.languages.createDiagnosticCollection("maimai");
   context.subscriptions.push(diagnostics);
+  const chartDiagnostics = registerChartDiagnostics(context, diagnostics);
+  registerChartCompletion(context);
   playbackDecoration = vscode.window.createTextEditorDecorationType({
     backgroundColor: "editor.wordHighlightBackground",
     isWholeLine: true,
@@ -89,7 +93,6 @@ export function activate(context: vscode.ExtensionContext) {
     currentPanel = panel;
 
     panel.onDidDispose(() => {
-      if (currentDocument) diagnostics?.delete(currentDocument.uri);
       currentPanel = undefined;
       currentDocument = undefined;
       sourceMap = [];
@@ -236,7 +239,7 @@ export function activate(context: vscode.ExtensionContext) {
     if (reveal?.editor === event.textEditor && event.visibleRanges.some((range) => range.start.line <= reveal.line && range.end.line >= reveal.line)) return;
     setFollowPlayback(false);
   }));
-  registerChartLanguageDetection(context);
+  registerChartLanguageDetection(context, (doc) => chartDiagnostics.revalidate(doc));
 }
 
 function isChartDocument(doc: vscode.TextDocument): boolean {
@@ -324,7 +327,6 @@ function updateChartFromDocument(panel: vscode.WebviewPanel, doc: vscode.TextDoc
       : parseSimaiChart(rawText, selectedDifficulty);
     sourceMap = format === "ma2" ? buildMa2SourceMap(rawText) : buildSimaiSourceMap(rawText, selectedDifficulty);
     if (!chart.title) chart.title = path.basename(doc.fileName);
-    diagnostics?.delete(doc.uri);
 
     panel.webview.postMessage({
       type: "chartUpdate",
@@ -338,16 +340,11 @@ function updateChartFromDocument(panel: vscode.WebviewPanel, doc: vscode.TextDoc
       bgmUri,
       ...playback,
     } as HostToWebviewMessage);
-  } catch (err: any) {
+  } catch (err: unknown) {
     sourceMap = [];
-    const message = err.message || String(err);
-    diagnostics?.set(doc.uri, [
-      new vscode.Diagnostic(
-        new vscode.Range(0, 0, Math.max(0, doc.lineCount - 1), 0),
-        message,
-        vscode.DiagnosticSeverity.Error,
-      ),
-    ]);
+    const message = err instanceof Error ? err.message : String(err);
+    // Problems-panel entries are owned by registerChartDiagnostics, which validates every
+    // difficulty; the preview only reports the selected chart's failure to the webview.
     panel.webview.postMessage({
       type: "chartUpdate",
       documentUri: doc.uri.toString(),

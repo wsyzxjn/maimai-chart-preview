@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { detectChartFormat } from "./parser/chartFormat";
 
 /** Only opened plaintext .txt documents are inspected; explicit language choices remain authoritative. */
-export function registerChartLanguageDetection(context: vscode.ExtensionContext) {
+export function registerChartLanguageDetection(context: vscode.ExtensionContext, onLanguageChanged?: (doc: vscode.TextDocument) => void) {
   const languages = new Map<string, string>();
   const manualChoices = new Set<string>();
   const changing = new Set<string>();
@@ -22,6 +22,7 @@ export function registerChartLanguageDetection(context: vscode.ExtensionContext)
     try {
       await vscode.languages.setTextDocumentLanguage(doc, format);
       languages.set(key, format);
+      onLanguageChanged?.(doc);
     } catch (error) {
       console.warn("maimai Chart Preview: could not set chart language", error);
     } finally {
